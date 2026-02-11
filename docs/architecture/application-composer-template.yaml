@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Diagram-oriented CloudFormation template for AWS Application Composer.
+  Mirrors the Cloud Honeypot Auto-Block Terraform architecture.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: honeypot-lab
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC ID used by ALB and instances.
+    Default: vpc-0123456789abcdef0
+  HoneypotSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-0123456789abcdef0
+  DemoSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-0123456789abcdef0
+  AlbSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-0123456789abcdef0,subnet-0fedcba9876543210
+  HoneypotSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-0123456789abcdef0
+  DemoWebSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-0123456789abcdef0
+  AlbSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Default: sg-0123456789abcdef0
+  HoneypotAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AL2023 AMI for honeypot host.
+    Default: ami-0123456789abcdef0
+  DemoWebAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AL2023 AMI for demo web host.
+    Default: ami-0123456789abcdef0
+  InstanceType:
+    Type: String
+    Default: t3.micro
+  BlockThreshold:
+    Type: Number
+    Default: 7
+
+Resources:
+  HoneypotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/${ProjectName}/honeypot'
+      RetentionInDays: 14
+
+  IpReputationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-ip-reputation'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ip
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ip
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  BlocklistIpSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub '${ProjectName}-blocklist'
+      Description: Auto-managed blocklist from honeypot detections
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: []
+
+  HoneypotWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${ProjectName}-web-acl'
+      Description: WebACL with blocklist rule
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub '${ProjectName}-webacl'
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: BlocklistRule
+          Priority: 1
+          Action:
+            Block: {}
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt BlocklistIpSet.Arn
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub '${ProjectName}-blocklist'
+            SampledRequestsEnabled: true
+
+  DecisionEngineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-decision-lambda-role-composer'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DecisionEngineInline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt IpReputationTable.Arn
+              - Effect: Allow
+                Action:
+                  - wafv2:GetIPSet
+                  - wafv2:UpdateIPSet
+                Resource: !GetAtt BlocklistIpSet.Arn
+
+  DecisionEngineFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-decision-engine-composer'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt DecisionEngineRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return {"ok": True, "message": "Application Composer architecture template"}
+      Environment:
+        Variables:
+          IP_TABLE_NAME: !Ref IpReputationTable
+          WAF_IPSET_ARN: !GetAtt BlocklistIpSet.Arn
+          BLOCK_THRESHOLD: !Ref BlockThreshold
+          ALLOWLIST_IPS: '[]'
+          AUTO_BLOCK_ENABLED: 'true'
+
+  AllowCloudWatchInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt DecisionEngineFunction.Arn
+      Principal: logs.amazonaws.com
+      SourceArn: !Sub '${HoneypotLogGroup.Arn}:*'
+
+  HoneypotToDecisionSubscription:
+    Type: AWS::Logs::SubscriptionFilter
+    DependsOn: AllowCloudWatchInvokeLambda
+    Properties:
+      DestinationArn: !GetAtt DecisionEngineFunction.Arn
+      FilterPattern: ''
+      LogGroupName: !Ref HoneypotLogGroup
+
+  HoneypotInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref HoneypotAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref HoneypotSubnetId
+      SecurityGroupIds:
+        - !Ref HoneypotSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-honeypot'
+
+  DemoWebInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref DemoWebAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref DemoSubnetId
+      SecurityGroupIds:
+        - !Ref DemoWebSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-demo-web'
+
+  DemoAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${ProjectName}-demo-alb-cmp'
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref AlbSubnetIds
+      SecurityGroups:
+        - !Ref AlbSecurityGroupId
+
+  DemoTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ProjectName}-demo-tg-cmp'
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      VpcId: !Ref VpcId
+      HealthCheckPath: /
+      Targets:
+        - Id: !Ref DemoWebInstance
+          Port: 80
+
+  DemoListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref DemoAlb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DemoTargetGroup
+
+  AlbWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref DemoAlb
+      WebACLArn: !GetAtt HoneypotWebAcl.Arn
+
+Outputs:
+  ComposerAlbDnsName:
+    Value: !GetAtt DemoAlb.DNSName
+  ComposerWebAclArn:
+    Value: !GetAtt HoneypotWebAcl.Arn
+  ComposerIpSetArn:
+    Value: !GetAtt BlocklistIpSet.Arn

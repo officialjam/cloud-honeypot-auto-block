@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Terraform local artifacts
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform vars (keep examples only)
+*.tfvars
+*.auto.tfvars
+!*.tfvars.example
+
+# Project-specific generated artifacts
+infra/terraform/.build/
+infra/terraform/state-backup-*/
+infra/terraform/fmt
+infra/terraform/terraform
