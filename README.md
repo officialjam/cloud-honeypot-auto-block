@@ -1,6 +1,6 @@
 # Cloud Honeypot Auto-Block (AWS + Terraform)
 
-Portfolio project that implements an automated detect-and-respond pipeline in AWS: public honeypot telemetry is scored in near real-time and abusive IPs are blocked through WAF without manual intervention.
+This project implements an automated detect-and-respond pipeline in AWS: public honeypot telemetry is scored in near real-time and abusive IPs are blocked through WAF without manual intervention.
 
 ![AWS Application Composer Diagram](docs/architecture/application-composer-diagram.png)
 
