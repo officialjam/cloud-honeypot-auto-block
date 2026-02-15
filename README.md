@@ -30,6 +30,8 @@ This project implements an automated detect-and-respond pipeline in AWS: public 
 
 ## Architecture Flow
 
+<img width="2200" height="1300" alt="application-composer-diagram" src="https://github.com/user-attachments/assets/e3ae1a3e-07e6-455c-a8dd-9d073be17470" />
+
 1. Public SSH attempts hit a honeypot EC2 instance.
 2. CloudWatch Agent ships honeypot logs to `/honeypot-lab/honeypot`.
 3. CloudWatch Logs subscription triggers the `decision-engine` Lambda.
