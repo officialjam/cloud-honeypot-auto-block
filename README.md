@@ -29,8 +29,6 @@ This project implements an automated detect-and-respond pipeline in AWS: public 
 - ALB (protected demo endpoint)
 
 ## Architecture Flow
-<img width="2200" height="1300" alt="application-composer-diagram" src="https://github.com/user-attachments/assets/ef97f4db-8d59-47de-81b9-75202dfb6241" />
-
 
 1. Public SSH attempts hit a honeypot EC2 instance.
 2. CloudWatch Agent ships honeypot logs to `/honeypot-lab/honeypot`.
